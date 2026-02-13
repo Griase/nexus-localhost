@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus | Local LLM Bridge</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module" src="./app.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #020202;
+            --sidebar-bg: #080808;
+            --accent-primary: #6366f1;
+            --accent-secondary: #0ea5e9;
+            --border-dim: #1a1a1a;
+            --glass-bg: rgba(10, 10, 10, 0.85);
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-dark);
+            color: #f3f4f6;
+            overflow: hidden;
+            letter-spacing: -0.01em;
+        }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #222; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #444; }
+        
+        .glass { background: var(--glass-bg); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+        .chat-bubble-user { 
+            background: linear-gradient(165deg, #312e81 0%, #1e1b4b 100%); 
+            border: 1px solid rgba(99, 102, 241, 0.3);
+        }
+        .chat-bubble-ai { 
+            background: #0c0c0c; 
+            border: 1px solid #1a1a1a; 
+        }
+        pre { 
+            background: #000 !important; 
+            border: 1px solid #1a1a1a; 
+            border-radius: 12px; 
+            padding: 1rem !important;
+            margin-top: 1rem; 
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
+        }
+        .pulse-accent { animation: pulse 2.5s infinite; }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4); }
+            70% { box-shadow: 0 0 0 8px rgba(99, 102, 241, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
+        }
+        .nav-link-active {
+            background: #111;
+            color: white;
+            border-left: 2px solid var(--accent-primary);
+        }
+        .input-glow:focus-within {
+            box-shadow: 0 0 20px rgba(99, 102, 241, 0.1);
+            border-color: rgba(99, 102, 241, 0.3);
+        }
+    </style>
+</head>
+<body class="h-screen flex flex-col">
+
+    <!-- Top Navigation -->
+    <nav class="h-16 border-b border-[#111] flex items-center justify-between px-6 glass z-50">
+        <div class="flex items-center gap-6">
+            <div class="flex items-center gap-3">
+                <div id="status-dot" class="w-2.5 h-2.5 rounded-full bg-red-500 ring-4 ring-red-500/10 transition-all duration-500"></div>
+                <div>
+                    <span class="text-xs font-black tracking-[0.25em] uppercase text-white">Nexus</span>
+                    <span class="text-[9px] mono text-gray-500 block -mt-1 transition-colors" id="connection-details">BRIDGE OFFLINE</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="flex items-center gap-3">
+            <div class="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-[#0a0a0a] border border-[#1a1a1a] rounded-full">
+                <i class="bi bi-cpu text-blue-400 text-xs"></i>
+                <span class="text-[10px] mono font-bold text-gray-400" id="active-model-display">LLAMA3</span>
+            </div>
+            <button id="help-btn" class="w-12 h-12 flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/5 rounded-full transition-all">
+                <i class="bi bi-info-circle text-lg"></i>
+            </button>
+            <button id="settings-toggle" class="w-12 h-12 flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/5 rounded-full transition-all">
+                <i class="bi bi-gear text-lg"></i>
+            </button>
+        </div>
+    </nav>
+
+    <main class="flex-1 flex overflow-hidden">
+        <!-- Minimal Sidebar -->
+        <aside class="w-16 md:w-80 border-r border-[#111] bg-[#050505] flex flex-col transition-all duration-300 overflow-hidden shrink-0">
+            <div class="p-5 flex flex-col gap-3">
+                <button id="new-chat" class="flex items-center justify-center md:justify-start gap-3 w-full bg-indigo-600 text-white font-bold py-3 px-4 rounded-xl hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-600/10">
+                    <i class="bi bi-plus-lg"></i>
+                    <span class="hidden md:inline text-sm">New Session</span>
+                </button>
+
+
+
+                <button id="download-bridge" class="flex items-center justify-center md:justify-start gap-3 w-full bg-[#0a0a0a] border border-[#1a1a1a] text-gray-500 font-bold py-3 px-4 rounded-xl hover:bg-[#1a1a1a] hover:text-white transition-all">
+                    <i class="bi bi-download"></i>
+                    <span class="hidden md:inline text-[11px] uppercase tracking-wider">Download Bridge</span>
+                </button>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto custom-scrollbar px-4 space-y-2 mt-4" id="chat-history">
+                <div class="text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-2 px-1">Session History</div>
+                <!-- History populated via JS -->
+            </div>
+
+            <div class="p-5 border-t border-[#111] bg-[#030303]">
+                <div class="space-y-3">
+                    <div class="flex items-center justify-between text-[10px] font-bold text-gray-500 uppercase">
+                        <span>System Latency</span>
+                        <span class="text-green-500 mono" id="ping-val">0ms</span>
+                    </div>
+                    <div class="h-1 bg-gray-900 rounded-full overflow-hidden">
+                        <div class="h-full bg-green-500 w-full opacity-30"></div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Chat View -->
+        <section class="flex-1 flex flex-col relative bg-[#050505]">
+            <!-- Messages Area -->
+            <div id="chat-messages" class="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-8">
+                <!-- Welcome State -->
+                <div id="welcome-state" class="h-full flex flex-col items-center justify-center text-center space-y-6 opacity-80">
+                    <div class="w-20 h-20 bg-blue-500/10 rounded-full flex items-center justify-center border border-blue-500/20">
+                        <i class="bi bi-terminal text-4xl text-blue-500"></i>
+                    </div>
+                    <div>
+                        <h2 class="text-2xl font-bold mb-2">Nexus Local</h2>
+                        <p class="text-gray-500 max-w-md mx-auto">Connected to your local machine. Fully private, fully local. Optimized for Roblox scripting and utility tasks.</p>
+                    </div>
+                    <div class="flex gap-3">
+                        <button id="example-roblox" class="px-4 py-2 bg-gray-900 border border-gray-800 rounded-lg text-xs hover:border-gray-600 transition-all">Roblox Example</button>
+                        <button id="example-search" class="px-4 py-2 bg-gray-900 border border-gray-800 rounded-lg text-xs hover:border-gray-600 transition-all">Search Example</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Contextual Toolbar -->
+            <div id="context-info" class="mx-6 px-4 py-2 bg-blue-500/5 border border-blue-500/20 rounded-t-xl hidden">
+                <span class="text-[10px] font-bold text-blue-400 flex items-center gap-2 uppercase tracking-widest">
+                    <div class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-ping"></div>
+                    Web context fetching active...
+                </span>
+            </div>
+
+            <!-- Input Bar -->
+            <div class="p-6">
+                <div class="max-w-4xl mx-auto glass border border-[#1a1a1a] rounded-2xl p-2 shadow-2xl">
+                    <div class="flex items-center gap-6 px-4 py-2 border-b border-[#111] mb-2">
+                        <label class="flex items-center gap-2 cursor-pointer group">
+                            <div class="relative w-7 h-4 bg-gray-900 rounded-full border border-gray-800 transition-colors group-has-[:checked]:bg-green-600 group-has-[:checked]:border-green-400">
+                                <input type="checkbox" id="toggle-web" class="sr-only peer">
+                                <div class="absolute top-[2px] left-[2px] w-[10px] h-[10px] bg-white rounded-full transition-all peer-checked:translate-x-3"></div>
+                            </div>
+                            <span class="text-[10px] font-bold text-gray-500 uppercase tracking-widest group-hover:text-gray-300">Search</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer group">
+                            <div class="relative w-7 h-4 bg-gray-900 rounded-full border border-gray-800 transition-colors group-has-[:checked]:bg-green-600 group-has-[:checked]:border-green-400">
+                                <input type="checkbox" id="toggle-chrome" class="sr-only peer">
+                                <div class="absolute top-[2px] left-[2px] w-[10px] h-[10px] bg-white rounded-full transition-all peer-checked:translate-x-3"></div>
+                            </div>
+                            <span class="text-[10px] font-bold text-gray-500 uppercase tracking-widest group-hover:text-gray-300">Deep Scrape</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer group">
+                            <div class="relative w-7 h-4 bg-gray-900 rounded-full border border-gray-800 transition-colors group-has-[:checked]:bg-pink-600 group-has-[:checked]:border-pink-400">
+                                <input type="checkbox" id="toggle-image-mode" class="sr-only peer">
+                                <div class="absolute top-[2px] left-[2px] w-[10px] h-[10px] bg-white rounded-full transition-all peer-checked:translate-x-3"></div>
+                            </div>
+                            <span class="text-[10px] font-bold text-gray-500 uppercase tracking-widest group-hover:text-pink-300">Image Gen</span>
+                        </label>
+                        <div class="flex-1"></div>
+                        <div class="flex items-center gap-2 opacity-50">
+                            <i class="bi bi-hdd-network text-xs"></i>
+                            <span class="text-[9px] mono uppercase tracking-tighter" id="session-status-text">LOCAL SESSION</span>
+                        </div>
+                    </div>
+                    
+                    <div class="flex items-end gap-2 p-1">
+                        <textarea id="user-input" rows="1" class="flex-1 bg-transparent border-none text-gray-200 p-2 focus:ring-0 outline-none resize-none custom-scrollbar text-sm" placeholder="Ask Nexus anything... (Shift+Enter for newline)"></textarea>
+                        <button id="send-btn" class="w-10 h-10 flex items-center justify-center bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-all disabled:opacity-30 disabled:grayscale">
+                            <i class="bi bi-arrow-up-short text-2xl"></i>
+                        </button>
+                    </div>
+                </div>
+                <p id="footer-status" class="text-[10px] text-center text-gray-600 mt-4 mono uppercase">Connected to localhost:5484 • Privacy Shield Active</p>
+            </div>
+        </section>
+    </main>
+
+    <!-- GLOBAL MODALS -->
+    <!-- Settings Modal Overlay -->
+    <div id="settings-panel" class="fixed inset-0 z-[100] p-6 flex items-center justify-center hidden">
+        <div class="absolute inset-0 bg-black/80 backdrop-blur-sm" id="settings-backdrop"></div>
+        <div class="relative bg-[#0f0f0f] border border-[#222] w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+            <div class="flex justify-between items-center p-6 border-b border-[#1a1a1a]">
+                <h2 class="text-xl font-bold flex items-center gap-2">
+                    <i class="bi bi-sliders text-indigo-500"></i> Nexus Preferences
+                </h2>
+                <button id="close-settings" class="text-gray-500 hover:text-white"><i class="bi bi-x-lg"></i></button>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto custom-scrollbar p-6">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <!-- Left Column: Core & Network -->
+                    <div class="space-y-6">
+                        <h3 class="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em]">Connection & Core</h3>
+                        
+                        <div class="group">
+                            <label class="block text-[10px] font-bold text-gray-500 uppercase mb-2 tracking-widest">Bridge Endpoint</label>
+                            <input id="backend-url" type="text" class="w-full bg-[#050505] border border-[#222] rounded-xl p-3 focus:ring-1 focus:ring-indigo-500 outline-none mono text-xs" placeholder="http://localhost:8000">
+                        </div>
+
+                        <div class="group">
+                            <label class="block text-[10px] font-bold text-gray-500 uppercase mb-2 tracking-widest">Inference Source</label>
+                            <select id="inference-mode" class="w-full bg-[#050505] border border-[#222] text-xs font-semibold text-white rounded-lg px-3 py-2.5 outline-none focus:border-indigo-500/50 transition-all cursor-pointer">
+                                <option value="proxy">External Provider (Ollama/LM Studio)</option>
+                                <option value="local">Direct GGUF (Internal Runner)</option>
+                            </select>
+                        </div>
+
+                        <div id="proxy-settings" class="space-y-4">
+                            <div class="group">
+                                <label class="block text-[10px] font-bold text-gray-500 uppercase mb-2 tracking-widest">Provider Endpoint</label>
+                                <input id="ollama-url" type="text" class="w-full bg-[#050505] border border-[#222] rounded-xl p-3 focus:ring-1 focus:ring-indigo-500 outline-none mono text-xs" placeholder="http://localhost:11434/api/chat">
+                            </div>
+                            <div class="group">
+                                <label class="block text-[10px] font-bold text-gray-500 uppercase mb-2 tracking-widest">Model Name</label>
+                                <input id="model-id" type="text" class="w-full bg-[#050505] border border-[#222] rounded-xl p-3 focus:ring-1 focus:ring-indigo-500 outline-none mono text-xs" placeholder="llama3">
+                            </div>
+                        </div>
+
+                        <div id="local-settings" class="space-y-4 hidden">
+                            <div class="group">
+                                <label class="block text-[10px] font-bold text-gray-500 uppercase mb-2 tracking-widest">Models Directory</label>
+                                <div class="flex gap-2">
+                                    <input id="models-path" type="text" class="flex-1 bg-[#050505] border border-[#222] rounded-xl p-3 focus:ring-1 focus:ring-indigo-500 outline-none mono text-xs" placeholder="./models">
+                                    <button id="scan-models" class="bg-[#1a1a1a] px-3 rounded-xl border border-[#222] hover:bg-[#222] transition-all"><i class="bi bi-arrow-clockwise"></i></button>
+                                </div>
+                            </div>
+                            <div class="group">
+                                <label class="block text-[10px] font-bold text-gray-500 uppercase mb-2 tracking-widest">Select GGUF File</label>
+                                <select id="local-model-selector" class="w-full bg-[#050505] border border-[#222] text-xs font-semibold text-indigo-400 rounded-lg px-3 py-2.5 outline-none focus:border-indigo-500/50 transition-all cursor-pointer">
+                                    <option value="">No models found</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Image Models Settings -->
+                        <div id="image-model-settings" class="pt-4 border-t border-[#1a1a1a] space-y-4">
+                            <h3 class="text-[10px] font-black text-pink-400 uppercase tracking-[0.2em]">Image Generation (SD)</h3>
+                            <div class="group">
+                                <label class="block text-[10px] font-bold text-gray-500 uppercase mb-2 tracking-widest">Image Models Dir</label>
+                                <div class="flex gap-2">
+                                    <input id="image-models-path" type="text" class="flex-1 bg-[#050505] border border-[#222] rounded-xl p-3 focus:ring-1 focus:ring-pink-500 outline-none mono text-xs" placeholder="D:/images">
+                                    <button id="scan-image-models" class="bg-[#1a1a1a] px-3 rounded-xl border border-[#222] hover:bg-[#222] transition-all"><i class="bi bi-arrow-clockwise text-pink-500"></i></button>
+                                </div>
+                            </div>
+                            <div class="group">
+                                <label class="block text-[10px] font-bold text-gray-500 uppercase mb-2 tracking-widest">Select SD Model</label>
+                                <select id="image-model-selector" class="w-full bg-[#050505] border border-[#222] text-xs font-semibold text-pink-400 rounded-lg px-3 py-2.5 outline-none focus:border-pink-500/50 transition-all cursor-pointer">
+                                    <option value="">No image models found</option>
+                                </select>
+                            </div>
+                            <div class="group">
+                                <label class="block text-[10px] font-bold text-gray-500 uppercase mb-2 tracking-widest">Output Folder Manager</label>
+                                <div class="space-y-2">
+                                    <div class="flex gap-2">
+                                        <input id="active-image-folder" type="text" class="flex-1 bg-[#050505] border border-[#222] rounded-xl p-3 focus:ring-1 focus:ring-pink-500 outline-none mono text-xs text-pink-400" placeholder="e.g. landscapes">
+                                        <button id="refresh-subfolders" class="bg-[#1a1a1a] px-3 rounded-xl border border-[#222] hover:bg-[#222] transition-all"><i class="bi bi-arrow-clockwise text-pink-500"></i></button>
+                                    </div>
+                                    <div id="subfolder-chips" class="flex flex-wrap gap-2 max-h-24 overflow-y-auto custom-scrollbar p-1">
+                                        <!-- Chips populated via JS -->
+                                        <button class="px-2 py-1 bg-pink-500/10 border border-pink-500/20 rounded-md text-[9px] text-pink-400 font-bold uppercase hover:bg-pink-500/20">Root</button>
+                                    </div>
+                                </div>
+                                <p class="text-[9px] text-gray-600 mt-2">Type any folder name above. It will be created automatically if it doesn't exist.</p>
+                            </div>
+                        </div>
+
+                        <div class="pt-4 border-t border-[#1a1a1a] space-y-4">
+                            <h3 class="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em]">Workspace Configuration</h3>
+                            
+                            <div class="flex items-center justify-between p-3 bg-black rounded-xl border border-[#1a1a1a] group">
+                                <span class="text-xs font-semibold text-gray-400">Scripting Mode</span>
+                                <label class="relative w-8 h-4 bg-gray-900 rounded-full cursor-pointer transition-colors group-has-[:checked]:bg-green-500 border border-[#222] ring-green-500/20 group-has-[:checked]:ring-4">
+                                    <input type="checkbox" id="toggle-script" class="sr-only peer">
+                                    <div class="absolute top-[1px] left-[1px] w-[12px] h-[12px] bg-white rounded-full transition-all peer-checked:translate-x-3.5"></div>
+                                </label>
+                            </div>
+
+                            <div id="lang-container" class="space-y-4 px-1">
+                                <div class="space-y-1.5">
+                                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Target Language</label>
+                                    <select id="language-selector" class="w-full bg-[#050505] border border-[#222] text-xs font-semibold text-indigo-400 rounded-lg px-3 py-2.5 outline-none focus:border-indigo-500/50 transition-all cursor-pointer">
+                                        <option value="Roblox Lua">Roblox Lua</option>
+                                        <option value="Python">Python</option>
+                                        <option value="JavaScript">JavaScript</option>
+                                        <option value="TypeScript">TypeScript</option>
+                                        <option value="C++">C++</option>
+                                        <option value="Rust">Rust</option>
+                                        <option value="Luau">Luau</option>
+                                    </select>
+                                </div>
+                                <div class="space-y-1.5">
+                                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Auto-Mirror Output File</label>
+                                    <input id="output-filename" type="text" class="w-full bg-[#050505] border border-[#222] rounded-xl p-3 focus:ring-1 focus:ring-indigo-500 outline-none mono text-xs text-indigo-400" placeholder="e.g. workspace.lua">
+                                    <p class="text-[9px] text-gray-600 mt-1">AI-generated code will automatically overwrite this file in the 'output/' directory.</p>
+                                </div>
+                            </div>
+
+                            <div class="flex items-center justify-between p-3 bg-black rounded-xl border border-[#1a1a1a] group">
+                                <span class="text-xs font-semibold text-gray-400">Compact Interface</span>
+                                <label class="relative w-8 h-4 bg-gray-900 rounded-full cursor-pointer transition-colors group-has-[:checked]:bg-green-500 border border-[#222] ring-green-500/20 group-has-[:checked]:ring-4">
+                                    <input type="checkbox" id="ui-compact" class="sr-only peer">
+                                    <div class="absolute top-[1px] left-[1px] w-[12px] h-[12px] bg-white rounded-full transition-all peer-checked:translate-x-3.5"></div>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right Column: Inference Params -->
+                    <div class="space-y-6">
+                        <h3 class="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em]">Generation Params</h3>
+                        
+                        <div class="space-y-4">
+                            <div>
+                                <div class="flex justify-between mb-2">
+                                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Temperature</label>
+                                    <span id="temp-val" class="text-[10px] mono text-indigo-500">0.7</span>
+                                </div>
+                                <input id="input-temp" type="range" min="0" max="2" step="0.1" value="0.7" class="w-full accent-indigo-500">
+                            </div>
+
+                            <div>
+                                <div class="flex justify-between mb-2">
+                                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Max New Tokens</label>
+                                    <span id="tokens-val" class="text-[10px] mono text-indigo-500">1024</span>
+                                </div>
+                                <input id="input-tokens" type="range" min="128" max="8192" step="128" value="1024" class="w-full accent-indigo-500">
+                            </div>
+
+                            <div>
+                                <label class="block text-[10px] font-bold text-gray-500 uppercase mb-2 tracking-widest">System Instruction Override</label>
+                                <textarea id="system-prompt-override" rows="4" class="w-full bg-[#050505] border border-[#222] rounded-xl p-3 focus:ring-1 focus:ring-indigo-500 outline-none text-xs custom-scrollbar resize-none" placeholder="Default: You are Nexus, a helpful AI assistant..."></textarea>
+                            </div>
+                        </div>
+
+                        <div class="pt-4 border-t border-[#1a1a1a] space-y-3">
+                            <h3 class="text-[10px] font-black text-red-400 uppercase tracking-[0.2em]">Maintenance</h3>
+                            <div class="flex gap-2">
+                                <button id="export-data" class="flex-1 bg-gray-900 hover:bg-gray-800 text-[10px] font-bold py-2 rounded-lg border border-[#222] transition-colors">Export All</button>
+                                <button id="clear-data" class="flex-1 bg-red-900/10 hover:bg-red-900/20 text-red-500 text-[10px] font-bold py-2 rounded-lg border border-red-500/20 transition-colors">Clear Data</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-6 border-t border-[#1a1a1a] bg-[#0c0c0c] flex justify-between items-center">
+                <p class="text-[10px] text-gray-500 mono">Configuration saved to LocalStorage</p>
+                <button id="save-settings" class="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-2.5 rounded-xl font-bold text-xs transition-all shadow-lg shadow-indigo-600/20">Apply & Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Setup Guide Modal -->
+    <div id="help-panel" class="fixed inset-0 z-[110] p-6 flex items-center justify-center hidden">
+        <div class="absolute inset-0 bg-black/90 backdrop-blur-xl" id="help-backdrop"></div>
+        <div class="relative bg-[#0a0a0a] border border-[#222] w-full max-w-2xl rounded-2xl shadow-2xl p-8 overflow-hidden">
+            <h2 class="text-2xl font-black mb-6 flex items-center gap-3">
+                <i class="bi bi-rocket-takeoff text-green-500"></i> Local Bridge Setup
+            </h2>
+            <div class="space-y-4 text-sm text-gray-300 leading-relaxed">
+                <p>To use Nexus, you need two things running locally:</p>
+                <ul class="list-disc list-inside space-y-1 text-xs text-gray-400">
+                    <li>The <b>Nexus Bridge</b> (Python backend) to handle web scraping and file saving.</li>
+                    <li>A <b>GGUF Runner</b> (like Ollama or LM Studio) to actually process your model files.</li>
+                </ul>
+                <div class="bg-black border border-[#1a1a1a] p-4 rounded-xl mono text-xs space-y-2">
+                    <p class="text-indigo-400"># 1. Install system dependencies</p>
+                    <p>pip install fastapi uvicorn requests duckduckgo_search beautifulsoup4 playwright</p>
+                    <p class="text-indigo-400"># 2. Install Chromium binaries (for Deep Scrape)</p>
+                    <p>python -m playwright install chromium</p>
+                    <p class="text-indigo-400"># 3. Launch Nexus Bridge</p>
+                    <p>python backend.py</p>
+                </div>
+                <div class="p-4 bg-violet-500/10 border border-violet-500/20 rounded-xl">
+                    <p class="font-bold text-violet-400 mb-1">What is Script Mode?</p>
+                    <p class="text-xs">Script Mode optimizes Nexus for software development. It enforces a strict system prompt that prioritizes code structure, performance, and technical accuracy.</p>
+                </div>
+
+                <div class="p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl">
+                    <p class="font-bold text-amber-400 mb-1 flex items-center gap-2">
+                        <i class="bi bi-browser-chrome"></i> What is Playwright?
+                    </p>
+                    <p class="text-xs mb-2">Playwright is a library used for <b>Deep Scrape</b>. It launches a real, invisible browser to read websites that use complex JavaScript (like React or Vue) which normal scrapers can't see.</p>
+                    <p class="text-[10px] text-gray-400 font-bold uppercase mb-1">Installation Fixes:</p>
+                    <div class="bg-black/50 p-2 rounded mono text-[10px] text-amber-200/70">
+                        # If it fails, try adding dependencies:<br>
+                        python -m playwright install chromium --with-deps<br>
+                        # Or force download if things are broken:<br>
+                        python -m playwright install --force
+                    </div>
+                    <p class="text-[9px] mt-2 text-gray-500 italic">Note: On Linux/WSL, you usually need sudo or to install system dependencies like libgbm1 manually.</p>
+                </div>
+
+                <div class="p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+                    <p class="font-bold text-blue-400 mb-1">Important Note:</p>
+                    <p class="text-xs">If you are accessing this site via HTTPS, your browser may block "Mixed Content". Either serve the frontend from localhost or allow insecure content for this origin in browser settings.</p>
+                </div>
+            </div>
+            <button id="close-help" class="mt-8 w-full bg-white text-black font-bold py-3 rounded-xl hover:bg-gray-200 transition-all">Got it</button>
+        </div>
+    </div>
+
+</body>
+</html>

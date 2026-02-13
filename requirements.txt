@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+requests
+ddgs
+beautifulsoup4
+playwright
+llama-cpp-python
+stable-diffusion-cpp-python
