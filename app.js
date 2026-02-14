@@ -655,9 +655,12 @@ async function handleSend() {
 
             const data = await res.json();
             if (res.ok) {
-                updateMessage(thinkingId, `![Generated Image](${data.image})\n\nPrompt: *${text}*`);
+                const saveNote = data.saved_to ? `\n\n💾 Saved to: \`${data.saved_to}\`` : '';
+                updateMessage(thinkingId, `![Generated Image](${data.image})\n\nPrompt: *${text}*${saveNote}`);
                 // Clear input after success
                 dom.input.value = '';
+                // Refresh subfolders list in case a new one was created
+                refreshImageSubfolders();
             } else {
                 updateMessage(thinkingId, `## Image Gen Failed\n${data.detail || 'Unknown error'}`);
             }
