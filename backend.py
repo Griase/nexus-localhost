@@ -47,7 +47,7 @@ except ImportError:
 parser = argparse.ArgumentParser(description="Nexus Local Bridge / BYOM Manager")
 # Using raw string for windows path to avoid escape character issues
 parser.add_argument("--dir", type=str, default=r"d:\ggufs", help="Directory containing GGUF files")
-parser.add_argument("--img-dir", type=str, default=r"d:\ggufs\img_gens", help="Directory containing Image models (SD)")
+parser.add_argument("--img-dir", type=str, default=r"d:\images", help="Directory containing Image models (SD)")
 parser.add_argument("--port", type=int, default=5484, help="Port to run the server on")
 parser.add_argument("--ctx", type=int, default=4096, help="Context size for models")
 args, unknown = parser.parse_known_args()
@@ -300,27 +300,43 @@ async def generate_image(req: ImageGenRequest):
         import io
         from PIL import Image
         
-        print(f"[*] Generating image: {req.prompt}")
-        # stable-diffusion-cpp-python returns a PIL Image or similar depending on version
-        # Usually: sd.txt2img(prompt=...)
-        images = state.sd_model.txt2img(
-            prompt=req.prompt,
-            negative_prompt=req.negative_prompt,
-            steps=req.steps,
-            cfg_scale=req.cfg_scale,
-            width=req.width,
-            height=req.height,
-            seed=req.seed
+        print(f"[*] Generating image: '{req.prompt}'")
+        
+        # Use the specific positional call structure requested
+        method_name = None
+        method = None
+        for candidate in ["txt2img", "generate_image", "txt_to_img"]:
+            if hasattr(state.sd_model, candidate):
+                method_name = candidate
+                method = getattr(state.sd_model, candidate)
+                break
+        
+        if not method:
+            available = [a for a in dir(state.sd_model) if not a.startswith('_')]
+            raise AttributeError(f"No generation method found. Checked: txt2img, generate_image, txt_to_img. Available: {available}")
+
+        print(f"[*] Generating with method '{method_name}' using positional arguments...")
+        
+        # Execute generation exactly as requested by user prompt
+        img = method(
+            req.prompt,
+            req.negative_prompt,
+            int(req.cfg_scale),
+            int(req.width),
+            int(req.height),
+            int(req.seed),
+            int(req.steps)
         )
         
-        img = images[0]
-        
         saved_path = None
-        if req.subfolder:
-            # Sanitize subfolder to prevent directory traversal
-            clean_subfolder = os.path.basename(req.subfolder) if req.subfolder != "." else ""
+        # Handle subfolder logic - create if it doesn't exist
+        sub_name = req.subfolder.strip() if req.subfolder else ""
+        if sub_name and sub_name.lower() != "root":
+            # Sanitize: only allow folder names, no paths
+            clean_subfolder = os.path.basename(sub_name)
             base = req.base_dir if req.base_dir else IMAGE_DIR
             out_path = os.path.normpath(os.path.join(base, clean_subfolder))
+            
             try:
                 os.makedirs(out_path, exist_ok=True)
                 filename = f"nexus_{int(time.time())}.png"
@@ -329,7 +345,7 @@ async def generate_image(req: ImageGenRequest):
                 saved_path = full_save_path
                 print(f"[*] Image saved to: {saved_path}")
             except Exception as e:
-                print(f"[!] Failed to save image to disk: {e}")
+                print(f"[!] Folder manager failed to save: {e}")
 
         buffered = io.BytesIO()
         img.save(buffered, format="PNG")
@@ -338,7 +354,8 @@ async def generate_image(req: ImageGenRequest):
         return {
             "status": "success", 
             "image": f"data:image/png;base64,{img_str}",
-            "saved_to": saved_path
+            "saved_to": saved_path,
+            "method_used": method_name
         }
     except Exception as e:
         import traceback
